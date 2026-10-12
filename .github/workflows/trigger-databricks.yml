@@ -1,52 +1,33 @@
 
-name: Test Databricks Authentication
+name: Trigger Databricks Job
 
 on:
   workflow_dispatch:
 
 jobs:
-  test-auth:
+  trigger-databricks:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Validate Databricks credentials
+      - name: Trigger Databricks Job
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_JOB_ID: ${{ secrets.DATABRICKS_JOB_ID }}
         run: |
           set -euo pipefail
 
-          if [[ -z "$DATABRICKS_HOST" || -z "$DATABRICKS_TOKEN" ]]; then
-            echo "ERROR: Workspace URL or token secret is empty."
-            exit 1
-          fi
+          RESPONSE=$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            "${DATABRICKS_HOST}/api/2.2/jobs/run-now" \
+            --header "Authorization: Bearer ${DATABRICKS_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "$(jq -n \
+              --argjson job_id "$DATABRICKS_JOB_ID" \
+              '{job_id: $job_id}')")
 
-          echo "Checking workspace URL format..."
+          RUN_ID=$(echo "$RESPONSE" | jq -er '.run_id')
 
-          if [[ ! "$DATABRICKS_HOST" =~ ^https://[^/]+/?$ ]]; then
-            echo "ERROR: DATABRICKS_HOST must be the HTTPS workspace URL only."
-            exit 1
-          fi
-
-          DATABRICKS_HOST="${DATABRICKS_HOST%/}"
-
-          echo "Checking Databricks authentication..."
-
-          HTTP_CODE=$(curl --silent --show-error \
-            --output /tmp/dbx-response.json \
-            --write-out "%{http_code}" \
-            "${DATABRICKS_HOST}/api/2.0/preview/scim/v2/Me" \
-            --header "Authorization: Bearer ${DATABRICKS_TOKEN}")
-
-          echo "HTTP status: $HTTP_CODE"
-
-          if [[ "$HTTP_CODE" == "200" ]]; then
-            echo "Authentication successful."
-            jq '{userName, displayName}' /tmp/dbx-response.json
-          else
-            echo "Authentication check failed. Response:"
-            jq -c '{error_code, message, detail}' \
-              /tmp/dbx-response.json 2>/dev/null \
-              || sed -n '1,10p' /tmp/dbx-response.json
-            exit 1
-          fi
+          echo "Databricks job triggered successfully."
+          echo "Run ID: $RUN_ID"
+          echo "Job URL: ${DATABRICKS_HOST}/jobs/${DATABRICKS_JOB_ID}/runs/${RUN_ID}"
