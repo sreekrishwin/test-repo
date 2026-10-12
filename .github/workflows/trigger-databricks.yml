@@ -1,0 +1,69 @@
+
+name: Trigger Databricks DVA Job
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_repo:
+        description: "Service repository name"
+        required: true
+        type: string
+        default: "payments-service"
+      source_env:
+        description: "Source environment"
+        required: true
+        type: choice
+        options:
+          - dev
+      target_env:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - qa
+
+permissions:
+  contents: read
+
+jobs:
+  trigger-databricks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Databricks job
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_JOB_ID: ${{ secrets.DATABRICKS_JOB_ID }}
+          SERVICE_REPO: ${{ inputs.service_repo }}
+          SOURCE_ENV: ${{ inputs.source_env }}
+          TARGET_ENV: ${{ inputs.target_env }}
+        run: |
+          set -euo pipefail
+
+          RESPONSE=$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            "${DATABRICKS_HOST}/api/2.2/jobs/run-now" \
+            --header "Authorization: Bearer ${DATABRICKS_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "$(jq -n \
+              --argjson job_id "$DATABRICKS_JOB_ID" \
+              --arg repo "$SERVICE_REPO" \
+              --arg source "$SOURCE_ENV" \
+              --arg target "$TARGET_ENV" \
+              '{
+                job_id: $job_id,
+                job_parameters: {
+                  service_repo: $repo,
+                  source_env: $source,
+                  target_env: $target
+                }
+              }')")
+
+          RUN_ID=$(echo "$RESPONSE" | jq -er '.run_id')
+
+          echo "Databricks job triggered successfully."
+          echo "Run ID: $RUN_ID"
+          echo "Service repository: $SERVICE_REPO"
+          echo "Environment comparison: $SOURCE_ENV -> $TARGET_ENV"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
