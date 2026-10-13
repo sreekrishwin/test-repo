@@ -1,8 +1,30 @@
 
-name: Trigger Databricks Job
+name: Trigger DVA Resource Discovery
 
 on:
   workflow_dispatch:
+    inputs:
+      repo_owner:
+        description: "GitHub organization or username"
+        required: true
+        type: string
+      repo_name:
+        description: "Service repository name"
+        required: true
+        type: string
+      branch:
+        description: "Branch to inspect"
+        required: true
+        type: string
+        default: "main"
+      repo_path:
+        description: "Folder path to inspect (optional)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
 
 jobs:
   trigger-databricks:
@@ -14,6 +36,10 @@ jobs:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
           DATABRICKS_JOB_ID: ${{ secrets.DATABRICKS_JOB_ID }}
+          REPO_OWNER: ${{ inputs.repo_owner }}
+          REPO_NAME: ${{ inputs.repo_name }}
+          BRANCH: ${{ inputs.branch }}
+          REPO_PATH: ${{ inputs.repo_path }}
         run: |
           set -euo pipefail
 
@@ -24,10 +50,24 @@ jobs:
             --header "Content-Type: application/json" \
             --data "$(jq -n \
               --argjson job_id "$DATABRICKS_JOB_ID" \
-              '{job_id: $job_id}')")
+              --arg owner "$REPO_OWNER" \
+              --arg repo "$REPO_NAME" \
+              --arg branch "$BRANCH" \
+              --arg path "$REPO_PATH" \
+              '{
+                job_id: $job_id,
+                job_parameters: {
+                  repo_owner: $owner,
+                  repo_name: $repo,
+                  branch: $branch,
+                  repo_path: $path
+                }
+              }')")
 
           RUN_ID=$(echo "$RESPONSE" | jq -er '.run_id')
 
           echo "Databricks job triggered successfully."
           echo "Run ID: $RUN_ID"
-          echo "Job URL: ${DATABRICKS_HOST}/jobs/${DATABRICKS_JOB_ID}/runs/${RUN_ID}"
+          echo "Repository: $REPO_OWNER/$REPO_NAME"
+          echo "Branch: $BRANCH"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
